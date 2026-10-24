@@ -1,3 +1,19 @@
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+
+class WebServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ْشغال البوت ابدا بس")
+
+def run_web_server():
+    server = HTTPServer(('0.0.0.0', 8080), WebServer)
+    server.serve_forever()
+
+
+threading.Thread(target=run_web_server, daemon=True).start()
+
 import os
 import re
 import io
