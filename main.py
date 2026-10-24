@@ -1,19 +1,3 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
-
-class WebServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"ْشغال البوت ابدا بس")
-
-def run_web_server():
-    server = HTTPServer(('0.0.0.0', 8080), WebServer)
-    server.serve_forever()
-
-
-threading.Thread(target=run_web_server, daemon=True).start()
-
 import os
 import re
 import io
@@ -21,12 +5,12 @@ import aiohttp
 import discord
 import threading
 from dotenv import load_dotenv
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 load_dotenv()
 
-# التوكنات (تتقرأ من إعدادات الاستضافة أو ملف .env)
-TOKEN1 = os.getenv("DISCORD_TOKEN")  # البوت الأول (بوت الفك)
-TOKEN2 = os.getenv("DISCORD_TOKEN2") # البوت الثاني (بوت الخاص اللي عطيتني إياه)
+TOKEN1 = os.getenv("DISCORD_TOKEN")
+TOKEN2 = os.getenv("DISCORD_TOKEN2")
 
 intents1 = discord.Intents.default()
 intents1.message_content = True
@@ -35,16 +19,24 @@ client1 = discord.Client(intents=intents1)
 intents2 = discord.Intents.default()
 client2 = discord.Client(intents=intents2)
 
-# ==========================================
-# محرك الفك (بدون حفظ أي ملفات)
-# ==========================================
+# سيرفر وهمي عشان Render ما يقفل البوت
+class WebServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), WebServer)
+    server.serve_forever()
+
+# محرك الفك
 def deobfuscate_engine(text):
-    # 1. فك WRD
     if "ALPHA85" in text and "d85" in text:
         try:
             m_u = re.search(r"local U=\{([\s\S]*?)\}\s*local segs=", text)
             m_segs = re.search(r"local segs=\{([\s\S]*?)\}\s*for _,s in ipairs\(segs\)", text)
-            
             if m_u and m_segs:
                 u_str = "{" + m_u.group(1) + "}"
                 segs_str = "{" + m_segs.group(1) + "}"
@@ -53,7 +45,6 @@ def deobfuscate_engine(text):
                 
                 alpha85 = "".join(chr(c) for c in range(35, 127) if c not in (34, 92))[:85]
                 b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-                
                 O = {char: i for i, char in enumerate(alpha85)}
                 W = {char: i for i, char in enumerate(b64)}
                 
@@ -100,7 +91,6 @@ def deobfuscate_engine(text):
                 return source, "تم فك WRD بنجاح"
         except Exception: pass
 
-    # 2. فك LuaObfuscator
     if "string.char" in text:
         def decode_char(m):
             nums = [int(x) for x in m.group(1).split(",") if x.strip().isdigit()]
@@ -111,7 +101,6 @@ def deobfuscate_engine(text):
         new_text = re.sub(r"string\.char\(([0-9,\s]+)\)", decode_char, text)
         if new_text != text: return new_text, "تم فك تشفير النصوص بنجاح"
 
-    # 3. Luraph / Moonsec
     if "Luraph" in text or "luraph_runtime1" in text or "MoonSec" in text:
         keys = re.findall(r'script_key\s*=\s*"([0-9a-f]{32})"', text)
         msg = "تم اكتشاف Luraph/Moonsec. السورس مرفق."
@@ -128,10 +117,6 @@ async def fetch_url(url):
                 return await r.text() if r.status == 200 else None
     except: return None
 
-
-# ==========================================
-# أوامر البوتات
-# ==========================================
 @client2.event
 async def on_ready():
     print(f"[بوت الخاص] شغال: {client2.user}")
@@ -145,8 +130,12 @@ async def on_message(message):
     if message.author == client1.user: return
 
     if message.content.startswith(".l"):
-        msg = await message.reply("جاري الفك... انتظر.")
-        
+        # 1. نحذف رسالة المستخدم على طول عشان محد يشوفها
+        try:
+            await message.delete()
+        except:
+            pass
+
         text = None
         src_name = "script.lua"
         
@@ -161,31 +150,29 @@ async def on_message(message):
             text = await fetch_url(url)
             src_name = "url_script.lua"
 
+        # 2. نرسل له بالخاص إننا بدينا
+        try:
+            await message.author.send("جاري الفك... انتظر شوي.")
+        except:
+            return # إذا خاصه مسكر، نوقف
+
         if not text:
-            await msg.edit(content="عطني ملف أو رابط صحيح.")
+            await message.author.send("ما قدرت أقرأ الملف أو الرابط. جرب ترفعه مرة ثانية.")
             return
 
+        # 3. نفك السكربت
         source_code, status = deobfuscate_engine(text)
-        await msg.edit(content=f"تم الفك ({status}).\nجاري إرسال السورس لك بالخاص...")
-
+        
+        # 4. نرسل السكربت المفكوك للخاص
         try:
-            # ندور على حسابك في السيرفر عشان ناخذ الآي دي
-            target_user = discord.utils.get(message.guild.members, name="673y")
-            
-            if target_user:
-                # ننشئ الملف في الذاكرة (بدون حفظ)
-                file_data = discord.File(fp=io.BytesIO(source_code.encode('utf-8')), filename=f"deobf_{src_name}")
-                # نرسل بالخاص باستخدام البوت الثاني
-                await target_user.send(content=f"تفضل السورس المفكوك لسكربت: {src_name}\nالحالة: {status}", file=file_data)
-                await msg.edit(content="تم إرسال السورس المفكوك إلى الخاص بنجاح!")
-            else:
-                await msg.edit(content="ما لقيت حساب باسم 673y في السيرفر. تأكد من الاسم.")
-        except discord.Forbidden:
-            await msg.edit(content="ما قدرت أرسل لك خاص. تأكد إنك مسوي خاصية استقبال الرسائل من أعضاء السيرفر مفتوحة.")
+            file_data = discord.File(fp=io.BytesIO(source_code.encode('utf-8')), filename=f"deobf_{src_name}")
+            await message.author.send(content=f"تم الفك ({status}).\nتفضل السورس:", file=file_data)
         except Exception as e:
-            await msg.edit(content=f"صار خطأ: {e}")
+            await message.author.send(f"صار خطأ وأنا أرسل الملف: {e}")
 
 if __name__ == "__main__":
+    threading.Thread(target=run_web_server, daemon=True).start()
+    
     t1 = threading.Thread(target=client1.run, args=(TOKEN1,))
     t2 = threading.Thread(target=client2.run, args=(TOKEN2,))
     
